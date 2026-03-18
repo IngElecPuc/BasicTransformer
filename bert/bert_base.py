@@ -1,22 +1,9 @@
-import yaml
 import torch
 import torch.nn as nn
-
-
-def create_bert_padding_mask(
-    input_ids: torch.Tensor,
-    pad_idx: int = 0,
-) -> torch.Tensor:
-    """
-    Máscara booleana para self-attention bidireccional en BERT.
-
-    input_ids: [B, T]
-
-    returns:
-        [B, 1, T]
-    """
-    return (input_ids != pad_idx).unsqueeze(1)
-
+from transformer.transformer_block import TransformerBlock
+from transformer.utils import validate_block_configs, make_repeated_block_configs
+from utils import create_bert_padding_mask
+import yaml
 
 class BertEmbeddings(nn.Module):
     """
@@ -96,7 +83,6 @@ class BertEmbeddings(nn.Module):
         embeddings = self.dropout(embeddings)
 
         return embeddings
-
 
 class BertEncoder(nn.Module):
     """
@@ -205,7 +191,6 @@ class BertEncoder(nn.Module):
 
         return outputs
 
-
 class BertPooler(nn.Module):
     """
     Pooler estilo BERT:
@@ -228,137 +213,6 @@ class BertPooler(nn.Module):
         pooled_output = self.dense(cls_token_state)
         pooled_output = self.activation(pooled_output)
         return pooled_output
-
-
-class BertPredictionHeadTransform(nn.Module):
-    def __init__(
-        self,
-        hidden_size: int,
-        hidden_act: str = "gelu",
-        layer_norm_eps: float = 1e-5,
-        bias: bool = True,
-    ):
-        super().__init__()
-
-        self.dense = nn.Linear(hidden_size, hidden_size, bias=bias)
-
-        if hidden_act.lower() == "gelu":
-            self.transform_act_fn = nn.GELU()
-        elif hidden_act.lower() == "relu":
-            self.transform_act_fn = nn.ReLU()
-        else:
-            raise ValueError("hidden_act debe ser 'gelu' o 'relu'")
-
-        self.layer_norm = nn.LayerNorm(hidden_size, eps=layer_norm_eps)
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.dense(hidden_states)
-        hidden_states = self.transform_act_fn(hidden_states)
-        hidden_states = self.layer_norm(hidden_states)
-        return hidden_states
-
-
-class BertLMPredictionHead(nn.Module):
-    """
-    Head de MLM.
-    Puede atar pesos con word_embeddings del modelo.
-    """
-
-    def __init__(
-        self,
-        hidden_size: int,
-        vocab_size: int,
-        hidden_act: str = "gelu",
-        layer_norm_eps: float = 1e-5,
-        bias: bool = True,
-    ):
-        super().__init__()
-
-        self.transform = BertPredictionHeadTransform(
-            hidden_size=hidden_size,
-            hidden_act=hidden_act,
-            layer_norm_eps=layer_norm_eps,
-            bias=bias,
-        )
-
-        self.decoder = nn.Linear(hidden_size, vocab_size, bias=False)
-        self.bias = nn.Parameter(torch.zeros(vocab_size))
-
-    def tie_weights(self, embedding_weight: nn.Parameter) -> None:
-        self.decoder.weight = embedding_weight
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.transform(hidden_states)
-        hidden_states = self.decoder(hidden_states) + self.bias
-        return hidden_states
-
-
-class BertOnlyMLMHead(nn.Module):
-    def __init__(
-        self,
-        hidden_size: int,
-        vocab_size: int,
-        hidden_act: str = "gelu",
-        layer_norm_eps: float = 1e-5,
-        bias: bool = True,
-    ):
-        super().__init__()
-        self.predictions = BertLMPredictionHead(
-            hidden_size=hidden_size,
-            vocab_size=vocab_size,
-            hidden_act=hidden_act,
-            layer_norm_eps=layer_norm_eps,
-            bias=bias,
-        )
-
-    def tie_weights(self, embedding_weight: nn.Parameter) -> None:
-        self.predictions.tie_weights(embedding_weight)
-
-    def forward(self, sequence_output: torch.Tensor) -> torch.Tensor:
-        return self.predictions(sequence_output)
-
-
-class BertOnlyNSPHead(nn.Module):
-    def __init__(self, hidden_size: int, bias: bool = True):
-        super().__init__()
-        self.seq_relationship = nn.Linear(hidden_size, 2, bias=bias)
-
-    def forward(self, pooled_output: torch.Tensor) -> torch.Tensor:
-        return self.seq_relationship(pooled_output)
-
-
-class BertPreTrainingHeads(nn.Module):
-    def __init__(
-        self,
-        hidden_size: int,
-        vocab_size: int,
-        hidden_act: str = "gelu",
-        layer_norm_eps: float = 1e-5,
-        bias: bool = True,
-    ):
-        super().__init__()
-
-        self.predictions = BertLMPredictionHead(
-            hidden_size=hidden_size,
-            vocab_size=vocab_size,
-            hidden_act=hidden_act,
-            layer_norm_eps=layer_norm_eps,
-            bias=bias,
-        )
-        self.seq_relationship = nn.Linear(hidden_size, 2, bias=bias)
-
-    def tie_weights(self, embedding_weight: nn.Parameter) -> None:
-        self.predictions.tie_weights(embedding_weight)
-
-    def forward(
-        self,
-        sequence_output: torch.Tensor,
-        pooled_output: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        prediction_scores = self.predictions(sequence_output)
-        seq_relationship_scores = self.seq_relationship(pooled_output)
-        return prediction_scores, seq_relationship_scores
-
 
 class BertModel(nn.Module):
     """
@@ -598,288 +452,125 @@ class BertModel(nn.Module):
     def print_summary(self, max_name_width: int = 60) -> None:
         print(self.summary(max_name_width=max_name_width))
 
-
-class BertForMaskedLM(nn.Module):
-    def __init__(
-        self,
-        bert: BertModel,
-        hidden_act: str = "gelu",
-        layer_norm_eps: float = 1e-5,
-        tie_word_embeddings: bool = True,
-        bias: bool = True,
-    ):
-        super().__init__()
-
-        self.bert = bert
-        self.cls = BertOnlyMLMHead(
-            hidden_size=bert.hidden_size,
-            vocab_size=bert.vocab_size,
-            hidden_act=hidden_act,
-            layer_norm_eps=layer_norm_eps,
-            bias=bias,
-        )
-
-        if tie_word_embeddings:
-            self.cls.tie_weights(self.bert.embeddings.word_embeddings.weight)
-
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        token_type_ids: torch.Tensor | None = None,
-        position_ids: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        auto_padding_mask: bool = True,
-        labels: torch.Tensor | None = None,
-        return_attentions: bool = False,
-        return_hidden_states: bool = False,
-    ) -> dict:
-        outputs = self.bert(
-            input_ids=input_ids,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            attention_mask=attention_mask,
-            auto_padding_mask=auto_padding_mask,
-            return_attentions=return_attentions,
-            return_hidden_states=return_hidden_states,
-        )
-
-        sequence_output = outputs["last_hidden_state"]
-        prediction_scores = self.cls(sequence_output)
-
-        result = {"logits": prediction_scores}
-
-        if labels is not None:
-            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(
-                prediction_scores.view(-1, prediction_scores.size(-1)),
-                labels.view(-1),
-            )
-            result["loss"] = loss
-
-        if return_hidden_states:
-            result["hidden_states"] = outputs.get("hidden_states")
-
-        if return_attentions:
-            result["attentions"] = outputs.get("attentions")
-
-        return result
+"""
+bert = BertModel.from_config({
+    "vocab_size": 30000,
+    "max_position_embeddings": 512,
+    "type_vocab_size": 2,
+    "pad_idx": 0,
+    "embedding_dropout": 0.1,
+    "bias": False,
+    "final_norm": True,
+    "add_pooling_layer": True,
+    "num_layers": 6,
+    "pattern": {
+        "d_model": 256,
+        "num_heads": 8,
+        "d_ff": 1024,
+        "dropout": 0.1,
+        "activation": "gelu",
+    },
+})
 
 
-class BertForNextSentencePrediction(nn.Module):
-    def __init__(self, bert: BertModel, bias: bool = True):
-        super().__init__()
-        self.bert = bert
+bert = BertModel.from_config({
+    "vocab_size": 30000,
+    "max_position_embeddings": 512,
+    "type_vocab_size": 2,
+    "pad_idx": 0,
+    "block_configs": [
+        {"d_model": 256, "num_heads": 8, "d_ff": 1024, "dropout": 0.1, "activation": "gelu"},
+        {"d_model": 256, "num_heads": 8, "d_ff": 1024, "dropout": 0.1, "activation": "gelu"},
+        {"d_model": 384, "num_heads": 8, "d_ff": 1536, "dropout": 0.1, "activation": "gelu"},
+    ],
+})
 
-        if self.bert.pooler is None:
-            raise ValueError("BertModel debe haberse creado con add_pooling_layer=True")
+bert = BertModel.from_config({
+    "vocab_size": 30000,
+    "max_position_embeddings": 512,
+    "type_vocab_size": 2,
+    "pad_idx": 0,
+    "block_configs": [
+        {"d_model": 256, "num_heads": 8, "d_ff": 1024, "dropout": 0.1, "activation": "gelu"},
+        {"d_model": 256, "num_heads": 8, "d_ff": 1024, "dropout": 0.1, "activation": "gelu"},
+        {"d_model": 384, "num_heads": 8, "d_ff": 1536, "dropout": 0.1, "activation": "gelu"},
+    ],
+})
 
-        self.cls = BertOnlyNSPHead(hidden_size=bert.hidden_size, bias=bias)
+input_ids = torch.randint(0, 30000, (2, 16))
+token_type_ids = torch.zeros_like(input_ids)
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        token_type_ids: torch.Tensor | None = None,
-        position_ids: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        auto_padding_mask: bool = True,
-        labels: torch.Tensor | None = None,
-        return_attentions: bool = False,
-        return_hidden_states: bool = False,
-    ) -> dict:
-        outputs = self.bert(
-            input_ids=input_ids,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            attention_mask=attention_mask,
-            auto_padding_mask=auto_padding_mask,
-            return_attentions=return_attentions,
-            return_hidden_states=return_hidden_states,
-        )
+outputs = model(
+    input_ids=input_ids,
+    token_type_ids=token_type_ids,
+)
 
-        pooled_output = outputs["pooler_output"]
-        seq_relationship_scores = self.cls(pooled_output)
+print(outputs["prediction_logits"].shape)       # [B, T, vocab_size]
+print(outputs["seq_relationship_logits"].shape) # [B, 2]
 
-        result = {"logits": seq_relationship_scores}
+YAML
 
-        if labels is not None:
-            loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(
-                seq_relationship_scores.view(-1, 2),
-                labels.view(-1),
-            )
-            result["loss"] = loss
+model:
+  bert:
+    vocab_size: 30000
+    max_position_embeddings: 512
+    type_vocab_size: 2
+    pad_idx: 0
+    embedding_dropout: 0.1
+    bias: false
+    final_norm: true
+    add_pooling_layer: true
 
-        if return_hidden_states:
-            result["hidden_states"] = outputs.get("hidden_states")
+    num_layers: 6
+    pattern:
+      d_model: 256
+      num_heads: 8
+      d_ff: 1024
+      dropout: 0.1
+      activation: gelu
 
-        if return_attentions:
-            result["attentions"] = outputs.get("attentions")
+model:
+  bert:
+    vocab_size: 30000
+    max_position_embeddings: 512
+    type_vocab_size: 2
+    pad_idx: 0
+    embedding_dropout: 0.1
+    bias: false
+    final_norm: true
+    add_pooling_layer: true
 
-        return result
+    num_layers: 6
+    pattern:
+      d_model: 256
+      num_heads: 8
+      d_ff: 1024
+      dropout: 0.1
+      activation: gelu
 
+model:
+  bert:
+    vocab_size: 30000
+    max_position_embeddings: 512
+    type_vocab_size: 2
+    pad_idx: 0
 
-class BertForPreTraining(nn.Module):
-    """
-    Pretraining estilo BERT original:
-    - Masked Language Modeling
-    - Next Sentence Prediction
-    """
-
-    def __init__(
-        self,
-        bert: BertModel,
-        hidden_act: str = "gelu",
-        layer_norm_eps: float = 1e-5,
-        tie_word_embeddings: bool = True,
-        bias: bool = True,
-    ):
-        super().__init__()
-
-        self.bert = bert
-
-        if self.bert.pooler is None:
-            raise ValueError("BertModel debe haberse creado con add_pooling_layer=True")
-
-        self.cls = BertPreTrainingHeads(
-            hidden_size=bert.hidden_size,
-            vocab_size=bert.vocab_size,
-            hidden_act=hidden_act,
-            layer_norm_eps=layer_norm_eps,
-            bias=bias,
-        )
-
-        if tie_word_embeddings:
-            self.cls.tie_weights(self.bert.embeddings.word_embeddings.weight)
-
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        token_type_ids: torch.Tensor | None = None,
-        position_ids: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        auto_padding_mask: bool = True,
-        mlm_labels: torch.Tensor | None = None,
-        nsp_labels: torch.Tensor | None = None,
-        return_attentions: bool = False,
-        return_hidden_states: bool = False,
-    ) -> dict:
-        outputs = self.bert(
-            input_ids=input_ids,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            attention_mask=attention_mask,
-            auto_padding_mask=auto_padding_mask,
-            return_attentions=return_attentions,
-            return_hidden_states=return_hidden_states,
-        )
-
-        sequence_output = outputs["last_hidden_state"]
-        pooled_output = outputs["pooler_output"]
-
-        prediction_scores, seq_relationship_scores = self.cls(
-            sequence_output=sequence_output,
-            pooled_output=pooled_output,
-        )
-
-        result = {
-            "prediction_logits": prediction_scores,
-            "seq_relationship_logits": seq_relationship_scores,
-        }
-
-        total_loss = None
-
-        if mlm_labels is not None:
-            mlm_loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-            mlm_loss = mlm_loss_fct(
-                prediction_scores.view(-1, prediction_scores.size(-1)),
-                mlm_labels.view(-1),
-            )
-            result["mlm_loss"] = mlm_loss
-            total_loss = mlm_loss if total_loss is None else total_loss + mlm_loss
-
-        if nsp_labels is not None:
-            nsp_loss_fct = nn.CrossEntropyLoss()
-            nsp_loss = nsp_loss_fct(
-                seq_relationship_scores.view(-1, 2),
-                nsp_labels.view(-1),
-            )
-            result["nsp_loss"] = nsp_loss
-            total_loss = nsp_loss if total_loss is None else total_loss + nsp_loss
-
-        if total_loss is not None:
-            result["loss"] = total_loss
-
-        if return_hidden_states:
-            result["hidden_states"] = outputs.get("hidden_states")
-
-        if return_attentions:
-            result["attentions"] = outputs.get("attentions")
-
-        return result
-
-    def parameter_counts(self) -> dict[str, int]:
-        total = sum(p.numel() for p in self.parameters())
-        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        non_trainable = total - trainable
-
-        return {
-            "total": total,
-            "trainable": trainable,
-            "non_trainable": non_trainable,
-        }
-
-    @staticmethod
-    def _format_int(n: int) -> str:
-        return f"{n:,}"
-
-    def summary(self, max_name_width: int = 60) -> str:
-        lines = []
-        sep = "-" * 120
-
-        header = (
-            f"{'Layer (name)':<{max_name_width}}"
-            f"{'Type':<25}"
-            f"{'Params':>15}"
-            f"{'Trainable':>15}"
-        )
-
-        lines.append("BertForPreTraining Summary")
-        lines.append(sep)
-        lines.append(header)
-        lines.append(sep)
-
-        for name, module in self.named_modules():
-            if name == "":
-                continue
-
-            module_params = sum(p.numel() for p in module.parameters(recurse=False))
-            module_trainable = sum(
-                p.numel() for p in module.parameters(recurse=False) if p.requires_grad
-            )
-
-            if module_params == 0:
-                continue
-
-            display_name = name
-            if len(display_name) > max_name_width - 3:
-                display_name = display_name[: max_name_width - 3] + "..."
-
-            lines.append(
-                f"{display_name:<{max_name_width}}"
-                f"{module.__class__.__name__:<25}"
-                f"{self._format_int(module_params):>15}"
-                f"{self._format_int(module_trainable):>15}"
-            )
-
-        counts = self.parameter_counts()
-
-        lines.append(sep)
-        lines.append(f"{'Total params:':<30}{self._format_int(counts['total'])}")
-        lines.append(f"{'Trainable params:':<30}{self._format_int(counts['trainable'])}")
-        lines.append(f"{'Non-trainable params:':<30}{self._format_int(counts['non_trainable'])}")
-        lines.append(sep)
-
-        return "\n".join(lines)
-
-    def print_summary(self, max_name_width: int = 60) -> None:
-        print(self.summary(max_name_width=max_name_width))
+    block_configs:
+      - d_model: 256
+        num_heads: 8
+        d_ff: 1024
+        dropout: 0.1
+        activation: gelu
+      - d_model: 256
+        num_heads: 8
+        d_ff: 1024
+        dropout: 0.1
+        activation: gelu
+      - d_model: 384
+        num_heads: 8
+        d_ff: 1536
+        dropout: 0.1
+        activation: gelu
+        
+                    
+"""
