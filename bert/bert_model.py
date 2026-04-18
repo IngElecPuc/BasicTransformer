@@ -18,6 +18,24 @@ class BertModel(nn.Module):
     Soporta construcción desde:
     - config en código
     - YAML
+
+    BERT suele ser mejor para:
+        clasificación
+        NER / token labeling
+        retrieval embeddings
+        reranking
+        extractive QA
+        tareas donde necesitas leer toda la secuencia bidireccionalmente
+
+    Propuestas:
+    - BertForTokenClassification, Para etiquetar cada token: NER, POS tagging, chunking, detección de entidades médicas o legales
+    - BertForQuestionAnswering, Para extractive QA tipo SQuAD -> dado contexto + pregunta, predecir inicio y fin del span respuesta
+    - BertForMultipleChoice, Para preguntas con varias opciones -> "cuál de estas 4 respuestas es correcta”
+    - BertForSentenceEmbedding: búsqueda semántica, clustering, deduplicación, retrieval -> contrastive loss, triplet loss, cosine similarity loss
+    - BertForPairScoring o BertForCrossEncoderRanking, Para ranking de pares -> query-document ranking, reranking en buscadores, matching pregunta-respuesta
+    - BertForRegression: Es igual a clasificación de secuencia, pero con una salida continua -> predicción de score, calidad de texto, relevancia 0–1, riesgo, prioridad, dificultad; MSE, MAE, Huber
+    - BertForRetrievalDualEncoder: Más que una sola clase, es una arquitectura con dos BERT compartidos o no -> encode query, encode document, comparar por coseno o dot product
+
     """
 
     def __init__(
@@ -191,7 +209,16 @@ class BertModel(nn.Module):
             "non_trainable": non_trainable,
         }
 
-    def summary(self, max_name_width: int = 60) -> str:
+    def summary(self, max_name_width: int = 60, verbosity: bool = True) -> str:
+        counts = self.parameter_counts()
+
+        if not verbosity:
+            lines = []
+            lines.append(f"{'Total params:':<30}{self._format_int(counts['total'])}")
+            lines.append(f"{'Trainable params:':<30}{self._format_int(counts['trainable'])}")
+            lines.append(f"{'Non-trainable params:':<30}{self._format_int(counts['non_trainable'])}")
+            return "\n".join(lines)
+
         lines = []
         sep = "-" * 120
 
@@ -230,8 +257,6 @@ class BertModel(nn.Module):
                 f"{self._format_int(module_trainable):>15}"
             )
 
-        counts = self.parameter_counts()
-
         lines.append(sep)
         lines.append(f"{'Total params:':<30}{self._format_int(counts['total'])}")
         lines.append(f"{'Trainable params:':<30}{self._format_int(counts['trainable'])}")
@@ -243,8 +268,8 @@ class BertModel(nn.Module):
 
         return "\n".join(lines)
 
-    def print_summary(self, max_name_width: int = 60) -> None:
-        print(self.summary(max_name_width=max_name_width))
+    def print_summary(self, max_name_width: int = 60, verbosity: bool = True) -> None:
+        print(self.summary(max_name_width=max_name_width, verbosity=verbosity))
 
 """
 bert = BertModel.from_config({

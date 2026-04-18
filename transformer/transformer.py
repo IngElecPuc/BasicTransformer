@@ -286,7 +286,16 @@ class Transformer(nn.Module):
             "non_trainable": non_trainable,
         }
 
-    def summary(self, max_name_width: int = 60) -> str:
+    def summary(self, max_name_width: int = 60, verbosity: bool = True) -> str:
+        counts = self.parameter_counts()
+
+        if not verbosity:
+            lines = []
+            lines.append(f"{'Total params:':<30}{self._format_int(counts['total'])}")
+            lines.append(f"{'Trainable params:':<30}{self._format_int(counts['trainable'])}")
+            lines.append(f"{'Non-trainable params:':<30}{self._format_int(counts['non_trainable'])}")
+            return "\n".join(lines)
+
         lines = []
         sep = "-" * 120
 
@@ -302,9 +311,6 @@ class Transformer(nn.Module):
         lines.append(header)
         lines.append(sep)
 
-        total_params = 0
-        total_trainable = 0
-
         for name, module in self.named_modules():
             if name == "":
                 continue
@@ -317,9 +323,6 @@ class Transformer(nn.Module):
             if module_params == 0:
                 continue
 
-            total_params += module_params
-            total_trainable += module_trainable
-
             display_name = name
             if len(display_name) > max_name_width - 3:
                 display_name = display_name[: max_name_width - 3] + "..."
@@ -331,14 +334,10 @@ class Transformer(nn.Module):
                 f"{self._format_int(module_trainable):>15}"
             )
 
-        counts = self.parameter_counts()
-
         lines.append(sep)
         lines.append(f"{'Total params:':<30}{self._format_int(counts['total'])}")
         lines.append(f"{'Trainable params:':<30}{self._format_int(counts['trainable'])}")
-        lines.append(
-            f"{'Non-trainable params:':<30}{self._format_int(counts['non_trainable'])}"
-        )
+        lines.append(f"{'Non-trainable params:':<30}{self._format_int(counts['non_trainable'])}")
         lines.append(sep)
 
         lines.append("Encoder")
@@ -356,5 +355,5 @@ class Transformer(nn.Module):
 
         return "\n".join(lines)
 
-    def print_summary(self, max_name_width: int = 60) -> None:
-        print(self.summary(max_name_width=max_name_width))
+    def print_summary(self, max_name_width: int = 60, verbosity: bool = True) -> None:
+        print(self.summary(max_name_width=max_name_width, verbosity=verbosity))

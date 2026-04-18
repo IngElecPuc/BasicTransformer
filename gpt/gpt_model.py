@@ -17,6 +17,25 @@ class GPTModel(nn.Module):
     - creación desde YAML
     - configuración repetida
     - configuración bloque a bloque
+
+    GPT suele ser mejor para:
+        generación
+        autocompletado
+        scoring autoregresivo
+        instruction following
+        tareas reformulables como “dado este prompt, genera esto”
+        reward / preference modeling
+
+    Propuestas:
+    - GPTForSequenceClassification
+    - GPTForTokenClassification, Menos típico que en BERT, pero posible.
+    - GPTForQuestionAnswering
+    - GPTForMultipleChoice
+    - GPTForRegression
+    - GPTForRewardModeling, útil para RLHF o ranking de respuestas
+    - GPTForPreferenceModeling, parecido al de arriba
+    - GPTForRetrievalScoring, para rankear documentos o respuestas condicionadas por un prompt
+    - GPTForConditionalGeneration
     """
 
     def __init__(
@@ -166,7 +185,16 @@ class GPTModel(nn.Module):
             "non_trainable": non_trainable,
         }
 
-    def summary(self, max_name_width: int = 60) -> str:
+    def summary(self, max_name_width: int = 60, verbosity: bool = True) -> str:
+        counts = self.parameter_counts()
+
+        if not verbosity:
+            lines = []
+            lines.append(f"{'Total params:':<30}{self._format_int(counts['total'])}")
+            lines.append(f"{'Trainable params:':<30}{self._format_int(counts['trainable'])}")
+            lines.append(f"{'Non-trainable params:':<30}{self._format_int(counts['non_trainable'])}")
+            return "\n".join(lines)
+
         lines = []
         sep = "-" * 120
 
@@ -205,8 +233,6 @@ class GPTModel(nn.Module):
                 f"{self._format_int(module_trainable):>15}"
             )
 
-        counts = self.parameter_counts()
-
         lines.append(sep)
         lines.append(f"{'Total params:':<30}{self._format_int(counts['total'])}")
         lines.append(f"{'Trainable params:':<30}{self._format_int(counts['trainable'])}")
@@ -218,5 +244,5 @@ class GPTModel(nn.Module):
 
         return "\n".join(lines)
 
-    def print_summary(self, max_name_width: int = 60) -> None:
-        print(self.summary(max_name_width=max_name_width))
+    def print_summary(self, max_name_width: int = 60, verbosity: bool = True) -> None:
+        print(self.summary(max_name_width=max_name_width, verbosity=verbosity))

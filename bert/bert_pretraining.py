@@ -118,7 +118,16 @@ class BertForPreTraining(nn.Module):
     def _format_int(n: int) -> str:
         return f"{n:,}"
 
-    def summary(self, max_name_width: int = 60) -> str:
+    def summary(self, max_name_width: int = 60, verbosity: bool = True) -> str:
+        counts = self.parameter_counts()
+
+        if not verbosity:
+            lines = []
+            lines.append(f"{'Total params:':<30}{self._format_int(counts['total'])}")
+            lines.append(f"{'Trainable params:':<30}{self._format_int(counts['trainable'])}")
+            lines.append(f"{'Non-trainable params:':<30}{self._format_int(counts['non_trainable'])}")
+            return "\n".join(lines)
+
         lines = []
         sep = "-" * 120
 
@@ -157,8 +166,6 @@ class BertForPreTraining(nn.Module):
                 f"{self._format_int(module_trainable):>15}"
             )
 
-        counts = self.parameter_counts()
-
         lines.append(sep)
         lines.append(f"{'Total params:':<30}{self._format_int(counts['total'])}")
         lines.append(f"{'Trainable params:':<30}{self._format_int(counts['trainable'])}")
@@ -167,6 +174,6 @@ class BertForPreTraining(nn.Module):
 
         return "\n".join(lines)
 
-    def print_summary(self, max_name_width: int = 60) -> None:
-        print(self.summary(max_name_width=max_name_width))
+    def print_summary(self, max_name_width: int = 60, verbosity: bool = True) -> None:
+        print(self.summary(max_name_width=max_name_width, verbosity=verbosity))
 
