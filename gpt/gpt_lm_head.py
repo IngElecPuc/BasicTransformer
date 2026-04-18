@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from .gpt_model import GPTModel
+from memory_estimator import estimate_gpt_activations, build_memory_estimate
 
 
 class GPTLMHeadModel(nn.Module):
@@ -210,7 +210,45 @@ class GPTLMHeadModel(nn.Module):
     def print_summary(self, max_name_width: int = 60, verbosity: bool = True) -> None:
         print(self.summary(max_name_width=max_name_width, verbosity=verbosity))
 
+    def vram_size(
+        self,
+        batch_size: int = 1,
+        seq_len: int = 128,
+        quantization_bits: int | None = None,
+        optimizer: str | None = None,
+        activation_dtype: torch.dtype = torch.float32,
+        include_attention_map: bool = True,
+        misc_runtime_bytes: int = 0,
+    ) -> dict:
+        activations_bytes, details = estimate_gpt_activations(
+            block_configs=self.gpt.block_configs,
+            batch_size=batch_size,
+            seq_len=seq_len,
+            vocab_size=self.gpt.vocab_size,
+            hidden_size=self.gpt.block_configs[0]["d_model"],
+            dtype=activation_dtype,
+            include_logits=True,
+            include_attention_map=include_attention_map,
+        )
 
+        details.update({
+            "batch_size": batch_size,
+            "seq_len": seq_len,
+            "quantization_bits": quantization_bits,
+            "optimizer": optimizer,
+            "activation_dtype": str(activation_dtype),
+            "model_kind": "gpt_lm_head",
+        })
+
+        return build_memory_estimate(
+            self,
+            activations_bytes=activations_bytes,
+            activation_details=details,
+            quantization_bits=quantization_bits,
+            optimizer=optimizer,
+            misc_runtime_bytes=misc_runtime_bytes,
+        )
+    
 """
 gpt = GPTModel.from_config({
     "vocab_size": 32000,

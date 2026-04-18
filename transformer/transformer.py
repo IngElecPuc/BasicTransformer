@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from .transformer_encoder import TransformerEncoder
 from .transformer_decoder import TransformerDecoder
+from memory_estimator import estimate_transformer_activations, build_memory_estimate
 
 from .utils import (
     validate_block_configs, 
@@ -46,20 +47,20 @@ class Transformer(nn.Module):
 
     def __init__(
         self,
-        vocab_size_src: int,
-        vocab_size_tgt: int,
-        encoder_block_configs: list[dict],
-        decoder_block_configs: list[dict],
-        max_len_src: int = 5000,
-        max_len_tgt: int = 5000,
-        pad_idx_src: int = 0,
-        pad_idx_tgt: int = 0,
-        encoder_input_dropout: float = 0.0,
-        decoder_input_dropout: float = 0.0,
-        bias: bool = False,
-        encoder_final_norm: bool = True,
-        decoder_final_norm: bool = True,
-        decoder_output_logits: bool = True,
+        vocab_size_src: int, #Tamaño del vocabulario del idioma fuente.
+        vocab_size_tgt: int, #Tamaño del vocabulario del final.
+        encoder_block_configs: list[dict], #Lista de bloques del encoder. Cada bloque define su ancho y estructura.
+        decoder_block_configs: list[dict], #Lista de bloques del decoder. Cada bloque define su ancho y estructura.
+        max_len_src: int = 5000, #Longitud máxima admitida del encoder.
+        max_len_tgt: int = 5000, #Longitud máxima admitida del decoder.
+        pad_idx_src: int = 0, #Índice del token de padding en la fuente. Se usa para construir máscaras del encoder y de cross-attention. 
+        pad_idx_tgt: int = 0, #Índice de padding del target.
+        encoder_input_dropout: float = 0.0, #Dropout aplicado en la entrada del encoder, en la parte de embeddings/positional encoding.
+        decoder_input_dropout: float = 0.0, #Idem, pero para decoder
+        bias: bool = False, #Indica si las capas lineales usan sesgo. Es perfectamente razonable en Transformers con LayerNorm.
+        encoder_final_norm: bool = True, #Activa una LayerNorm final en el encoder.
+        decoder_final_norm: bool = True, #Aplica LayerNorm al final del decoder
+        decoder_output_logits: bool = True, #Hace que el decoder produzca logits sobre el vocabulario de salida, en vez de devolver solo estados ocultos. Para traducción esto en True
     ):
         super().__init__()
 
@@ -357,3 +358,51 @@ class Transformer(nn.Module):
 
     def print_summary(self, max_name_width: int = 60, verbosity: bool = True) -> None:
         print(self.summary(max_name_width=max_name_width, verbosity=verbosity))
+
+    def vram_size(
+        self,
+        batch_size: int = 1,
+        src_seq_len: int = 128,
+        tgt_seq_len: int = 128,
+        quantization_bits: int | None = None,
+        optimizer: str | None = None,
+        activation_dtype: torch.dtype = torch.float32,
+        include_logits: bool | None = None,
+        include_attention_map: bool = True,
+        misc_runtime_bytes: int = 0,
+    ) -> dict:
+        if include_logits is None:
+            include_logits = self.decoder_output_logits
+
+        activations_bytes, details = estimate_transformer_activations(
+            encoder_block_configs=self.encoder_block_configs,
+            decoder_block_configs=self.decoder_block_configs,
+            batch_size=batch_size,
+            src_seq_len=src_seq_len,
+            tgt_seq_len=tgt_seq_len,
+            src_vocab_size=self.vocab_size_src,
+            tgt_vocab_size=self.vocab_size_tgt,
+            encoder_dtype=activation_dtype,
+            decoder_dtype=activation_dtype,
+            include_logits=include_logits,
+            include_attention_map=include_attention_map,
+        )
+
+        details.update({
+            "batch_size": batch_size,
+            "src_seq_len": src_seq_len,
+            "tgt_seq_len": tgt_seq_len,
+            "quantization_bits": quantization_bits,
+            "optimizer": optimizer,
+            "activation_dtype": str(activation_dtype),
+            "model_kind": "transformer_encoder_decoder",
+        })
+
+        return build_memory_estimate(
+            self,
+            activations_bytes=activations_bytes,
+            activation_details=details,
+            quantization_bits=quantization_bits,
+            optimizer=optimizer,
+            misc_runtime_bytes=misc_runtime_bytes,
+        )

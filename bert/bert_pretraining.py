@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from .bert_model import BertModel
 from .bert_heads import BertPreTrainingHeads
+from memory_estimator import estimate_bert_activations, build_memory_estimate
 
 
 class BertForPreTraining(nn.Module):
@@ -177,3 +178,43 @@ class BertForPreTraining(nn.Module):
     def print_summary(self, max_name_width: int = 60, verbosity: bool = True) -> None:
         print(self.summary(max_name_width=max_name_width, verbosity=verbosity))
 
+    def vram_size(
+        self,
+        batch_size: int = 1,
+        seq_len: int = 128,
+        quantization_bits: int | None = None,
+        optimizer: str | None = None,
+        activation_dtype: torch.dtype = torch.float32,
+        include_attention_map: bool = True,
+        misc_runtime_bytes: int = 0,
+    ) -> dict:
+        activations_bytes, details = estimate_bert_activations(
+            block_configs=self.bert.block_configs,
+            batch_size=batch_size,
+            seq_len=seq_len,
+            vocab_size=self.bert.vocab_size,
+            hidden_size=self.bert.block_configs[0]["d_model"],
+            dtype=activation_dtype,
+            include_pooler=True,
+            include_mlm_logits=True,
+            include_nsp_logits=True,
+            include_attention_map=include_attention_map,
+        )
+
+        details.update({
+            "batch_size": batch_size,
+            "seq_len": seq_len,
+            "quantization_bits": quantization_bits,
+            "optimizer": optimizer,
+            "activation_dtype": str(activation_dtype),
+            "model_kind": "bert_pretraining",
+        })
+
+        return build_memory_estimate(
+            self,
+            activations_bytes=activations_bytes,
+            activation_details=details,
+            quantization_bits=quantization_bits,
+            optimizer=optimizer,
+            misc_runtime_bytes=misc_runtime_bytes,
+        )

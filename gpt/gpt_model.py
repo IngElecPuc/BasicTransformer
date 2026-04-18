@@ -1,12 +1,11 @@
 import yaml
 import torch
 import torch.nn as nn
-
 from .gpt_embeddings import GPTEmbeddings
 from .gpt_decoder import GPTDecoder
 from .utils import create_gpt_padding_mask, create_causal_mask, combine_masks
 from transformer.utils import validate_block_configs, make_repeated_block_configs
-
+from memory_estimator import estimate_gpt_activations, build_memory_estimate
 
 
 class GPTModel(nn.Module):
@@ -246,3 +245,43 @@ class GPTModel(nn.Module):
 
     def print_summary(self, max_name_width: int = 60, verbosity: bool = True) -> None:
         print(self.summary(max_name_width=max_name_width, verbosity=verbosity))
+
+    def vram_size(
+        self,
+        batch_size: int = 1,
+        seq_len: int = 128,
+        quantization_bits: int | None = None,
+        optimizer: str | None = None,
+        activation_dtype: torch.dtype = torch.float32,
+        include_logits: bool = False,
+        include_attention_map: bool = True,
+        misc_runtime_bytes: int = 0,
+    ) -> dict:
+        activations_bytes, details = estimate_gpt_activations(
+            block_configs=self.block_configs,
+            batch_size=batch_size,
+            seq_len=seq_len,
+            vocab_size=self.vocab_size,
+            hidden_size=self.block_configs[0]["d_model"],
+            dtype=activation_dtype,
+            include_logits=include_logits,
+            include_attention_map=include_attention_map,
+        )
+
+        details.update({
+            "batch_size": batch_size,
+            "seq_len": seq_len,
+            "quantization_bits": quantization_bits,
+            "optimizer": optimizer,
+            "activation_dtype": str(activation_dtype),
+            "model_kind": "gpt_base",
+        })
+
+        return build_memory_estimate(
+            self,
+            activations_bytes=activations_bytes,
+            activation_details=details,
+            quantization_bits=quantization_bits,
+            optimizer=optimizer,
+            misc_runtime_bytes=misc_runtime_bytes,
+        )
