@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from multihead_attention import MultiHeadSelfAttention
-from multihead_cross_attention import MultiHeadCrossAttention
+from .multihead_attention import MultiHeadSelfAttention
+from .multihead_cross_attention import MultiHeadCrossAttention
 
 class TransformerDecoderBlock(nn.Module):
     def __init__(

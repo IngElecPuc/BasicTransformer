@@ -1,10 +1,10 @@
 import yaml
 import torch
 import torch.nn as nn
-from transformer_encoder import TransformerEncoder
-from transformer_decoder import TransformerDecoder
+from .transformer_encoder import TransformerEncoder
+from .transformer_decoder import TransformerDecoder
 
-from utils import (
+from .utils import (
     validate_block_configs, 
     validate_decoder_block_configs,
     create_causal_mask,

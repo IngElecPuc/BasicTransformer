@@ -1,9 +1,6 @@
 
 import torch
 import torch.nn as nn
-from transformer.transformer_block import TransformerBlock
-from transformer.utils import validate_block_configs
-
 
 class BertPredictionHeadTransform(nn.Module):
     def __init__(

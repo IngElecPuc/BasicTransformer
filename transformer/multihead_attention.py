@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-from self_attention import SelfAttentionHead
+from .self_attention import SelfAttentionHead
 
 class MultiHeadSelfAttention(nn.Module):
     def __init__(

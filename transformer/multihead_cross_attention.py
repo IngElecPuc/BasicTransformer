@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from cross_attention import CrossAttentionHead
+from .cross_attention import CrossAttentionHead
 
 class MultiHeadCrossAttention(nn.Module):
     def __init__(
